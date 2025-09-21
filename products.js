@@ -1,49 +1,69 @@
-const fs = require('fs').promises
-const path = require('path')
+// products.js
+const mongoose = require('./db')
 
-const productsFile = path.join(__dirname, 'data/full-products.json')
+// Keep tags compatible with your JSON shape: { title: String }
+const TagSchema = new mongoose.Schema(
+  { title: { type: String, trim: true, required: true } },
+  { _id: false }
+)
 
-/**
- * List products
- * @param {*} options 
- * @returns 
- */
+const ProductSchema = new mongoose.Schema(
+  {
+    title: { type: String, required: true, trim: true },
+    description: { type: String, trim: true },
+    price: { type: Number },
+    image: { type: String, trim: true },
+    // array of { title }
+    tags: { type: [TagSchema], default: [] },
+  },
+  { timestamps: true }
+)
+
+const Product = mongoose.model('Product', ProductSchema)
+
+/** Create */
+async function create(fields = {}) {
+  const doc = await Product.create(fields)
+  return doc.toObject()
+}
+
+/** List with offset/limit and optional tag */
 async function list(options = {}) {
+  const { offset = 0, limit = 25, tag } = options
+  const query = tag ? { tags: { $elemMatch: { title: tag } } } : {}
 
-  const { offset = 0, limit = 25, tag } = options;
+  const docs = await Product.find(query)
+    .sort({ _id: 1 })
+    .skip(Number(offset))
+    .limit(Number(limit))
+    .lean()
 
-  const data = await fs.readFile(productsFile)
-  return JSON.parse(data)
-    .filter(product => {
-      if (!tag) {
-        return product
-      }
-
-      return product.tags.find(({ title }) => title == tag)
-    })
-    .slice(offset, offset + limit) // Slice the products
+  return docs
 }
 
-/**
- * Get a single product
- * @param {string} id
- * @returns {Promise<object>}
- */
+/** Get by _id */
 async function get(id) {
-  const products = JSON.parse(await fs.readFile(productsFile))
-
-  // Loop through the products and return the product with the matching id
-  for (let i = 0; i < products.length; i++) {
-    if (products[i].id === id) {
-      return products[i]
-    }
-  }
-
-  // If no product is found, return null
-  return null;
+  if (!mongoose.isValidObjectId(id)) return null
+  const doc = await Product.findById(id).lean()
+  return doc || null
 }
 
-module.exports = {
-  list,
-  get
+/** Edit (partial update) by _id */
+async function edit(id, change = {}) {
+  if (!mongoose.isValidObjectId(id)) return null
+  const doc = await Product.findById(id)
+  if (!doc) return null
+
+  Object.assign(doc, change)
+  await doc.save()
+  return doc.toObject()
 }
+
+/** Delete by _id */
+async function destroy(id) {
+  if (!mongoose.isValidObjectId(id)) return false
+  const res = await Product.deleteOne({ _id: id })
+  return res.deletedCount > 0
+}
+
+module.exports = { create, list, get, edit, destroy }
